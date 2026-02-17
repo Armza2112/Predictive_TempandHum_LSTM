@@ -29,9 +29,9 @@ models/*.onnx
 models/*.json
 models/*.h5
 
-# --- Notebooks ---
-.ipynb_checkpoints/
-*/.ipynb_checkpoints/*
+# # --- Notebooks ---
+# .ipynb_checkpoints/
+# */.ipynb_checkpoints/*
 
 # --- IDEs & OS ---
 .vscode/
