@@ -12,10 +12,10 @@ DEFAULT_RAW_PATH     = Path("data/raw/sensor_data_raw.csv")
 DEFAULT_CLEAN_PATH   = Path("data/processed/sensor_data_clean.csv")
 TIMEZONE_TARGET      = "Asia/Bangkok"
 RESAMPLE_FREQ        = "10min"
-INTERP_LIMIT_HOURS   = 6           # ไม่ interpolate ข้าม gap > 6 ชม.
-OUTLIER_IQR_FACTOR   = 1.5         # IQR fence multiplier
-OUTLIER_ZSCORE_THRESH = 3.0        # rolling z-score threshold
-ROLLING_WINDOW_ROWS  = 144         # 144 * 10min = 1 วัน
+INTERP_LIMIT_HOURS   = 6         
+OUTLIER_IQR_FACTOR   = 1.5        
+OUTLIER_ZSCORE_THRESH = 3.0      
+ROLLING_WINDOW_ROWS  = 144       
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -24,16 +24,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-
-# ══════════════════════════════════════════════
-#  STEP 1 – โหลดข้อมูล
-# ══════════════════════════════════════════════
 def load_raw(path: Path) -> pd.DataFrame:
-    """
-    โหลด raw CSV และ parse คอลัมน์ _time เป็น datetime (tz-aware)
-    คืน DataFrame ที่เรียงตาม _time
-    """
-    log.info("📂  Loading raw data: %s", path)
+    log.info("Loading raw data: %s", path)
     df = pd.read_csv(path)
     df["_time"] = pd.to_datetime(df["_time"], format="mixed", utc=True)
     df = df.sort_values("_time").reset_index(drop=True)
@@ -43,29 +35,14 @@ def load_raw(path: Path) -> pd.DataFrame:
              df["_time"].max().strftime("%Y-%m-%d %H:%M"))
     return df
 
-
-# ══════════════════════════════════════════════
-#  STEP 2 – ลบ Near-Duplicate Timestamps
-# ══════════════════════════════════════════════
 def remove_near_duplicates(df: pd.DataFrame, round_freq: str = "1min") -> pd.DataFrame:
-    """
-    Sensor บางตัวส่งค่าหลายครั้งในช่วง < 1 วินาที
-    แก้ด้วยการ round timestamp ไป 1 นาที แล้ว group mean
-
-    Parameters
-    ----------
-    df         : DataFrame ที่มีคอลัมน์ _time, hum, temp
-    round_freq : ความถี่ที่ใช้ round (default: '1min')
-    """
     before = len(df)
 
-    # ตรวจจับ near-duplicate
     diff_sec = df["_time"].diff().dt.total_seconds()
     n_near_dupes = (diff_sec < 1).sum()
     log.info("🔍  Near-duplicate rows (Δt < 1s): %d  (%.1f%%)",
              n_near_dupes, n_near_dupes / before * 100)
 
-    # round แล้ว aggregate
     df = df[["_time", "hum", "temp"]].copy()
     df["_time_rounded"] = df["_time"].dt.round(round_freq)
 
@@ -76,45 +53,24 @@ def remove_near_duplicates(df: pd.DataFrame, round_freq: str = "1min") -> pd.Dat
     )
 
     after = len(df_dedup)
-    log.info("✅  After dedup: %d → %d rows  (removed %d)", before, after, before - after)
+    log.info("After dedup: %d → %d rows  (removed %d)", before, after, before - after)
     return df_dedup
 
 def convert_timezone(df: pd.DataFrame, tz: str = TIMEZONE_TARGET) -> pd.DataFrame:
-    """
-    แปลง _time จาก UTC → tz ที่ระบุ แล้วลบ tzinfo ออก
-    เพื่อให้เป็น naive datetime สำหรับ resample
-
-    Parameters
-    ----------
-    df : DataFrame ที่มีคอลัมน์ _time (tz-aware UTC)
-    tz : timezone เป้าหมาย (default: 'Asia/Bangkok')
-    """
-    log.info("🕐  Converting timezone: UTC → %s", tz)
+    log.info("Converting timezone: UTC → %s", tz)
     df = df.copy()
     df["_time"] = (
         df["_time"]
         .dt.tz_convert(tz)
-        .dt.tz_localize(None)   # ทำให้เป็น naive datetime
+        .dt.tz_localize(None)  
     )
     log.info("    New range: %s → %s",
              df["_time"].min().strftime("%Y-%m-%d %H:%M"),
              df["_time"].max().strftime("%Y-%m-%d %H:%M"))
     return df
 
-
-# ══════════════════════════════════════════════
-#  STEP 4 – Resample เป็น Regular Intervals
-# ══════════════════════════════════════════════
 def resample_regular(df: pd.DataFrame, freq: str = RESAMPLE_FREQ) -> pd.DataFrame:
-    """
-    สร้าง time index สม่ำเสมอทุก `freq` แล้ว resample ด้วย mean
-    ช่วงที่ขาดข้อมูลจะกลายเป็น NaN รอการ interpolate
 
-    Parameters
-    ----------
-    df   : DataFrame ที่มีคอลัมน์ _time (naive datetime), hum, temp
-    freq : ความถี่ในการ resample (default: '10min')
-    """
     log.info("📊  Resampling to %s intervals...", freq)
     df_idx = df.set_index("_time")[["hum", "temp"]]
     df_res = df_idx.resample(freq).mean()

@@ -97,26 +97,10 @@ def clean_latest(df):
     log.info("    Clean rows: %d", len(df))
     return df
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  3. Predict 24 ชั่วโมงล่วงหน้า (LSTM Multi-Output)
-# ══════════════════════════════════════════════════════════════════════════════
 def predict_24h(df, model_dir: Path = MODEL_DIR) -> "pd.DataFrame":
-    """
-    ทำนาย 24h ล่วงหน้าด้วย Bidirectional LSTM
-    คืน DataFrame index=timestamp, คอลัมน์ temp_pred, hum_pred
-    """
     return predict_lstm(df, model_dir)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  4. ส่งไปยัง ThingsBoard ผ่าน MQTT
-# ══════════════════════════════════════════════════════════════════════════════
 def _build_history_batch(df_clean: "pd.DataFrame", hours: int = 24) -> list:
-    """
-    แปลงข้อมูลจริงย้อนหลัง `hours` ชั่วโมงเป็น batch entries
-    Resample เป็น 1 ชั่วโมง → 24 จุด  keys: temp_actual, hum_actual
-    """
     import pandas as pd
 
     import time as _time

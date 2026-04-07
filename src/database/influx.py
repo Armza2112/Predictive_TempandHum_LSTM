@@ -54,7 +54,7 @@ class DatabaseHandler:
             return df_pivot
 
         except Exception as e:
-            print(f"❌ Error during manual fetch: {e}")
+            print(f"Error during manual fetch: {e}")
             return pd.DataFrame()
         
     def close(self):
