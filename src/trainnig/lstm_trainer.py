@@ -47,10 +47,13 @@ N_FEATURES     = 8
 LSTM_UNITS     = [128, 64]   # BiLSTM layers (จะเป็น 256 และ 128 จริงเพราะ Bidirectional)
 DENSE_UNITS    = [128, 64]
 DROPOUT        = 0.2
-RECURRENT_DROPOUT = 0.1
+# ⚠️  recurrent_dropout ต้องเป็น 0 เพื่อให้ใช้ CuDNN kernel (เร็วกว่า 10x บน GPU)
+#     ถ้าใส่ค่า > 0 TF จะ fallback ไป generic kernel ที่ช้ากว่ามาก
+RECURRENT_DROPOUT = 0.0
 
 # ── Training ─────────────────────────────────────────────────────────────────
-BATCH_SIZE     = 64
+# batch ใหญ่ขึ้นเพื่อ saturate GPU (ปรับลดถ้า VRAM ไม่พอ)
+BATCH_SIZE     = 256
 MAX_EPOCHS     = 500
 PATIENCE_STOP  = 40          # early stopping patience
 PATIENCE_LR    = 15          # ReduceLROnPlateau patience
@@ -188,7 +191,11 @@ def build_model(
     import tensorflow as tf
     from tensorflow.keras import layers, Model
 
-    inp = tf.keras.Input(shape=(lookback, n_features), name="input_seq")
+    # ใช้ dtype ตาม global policy (float16 บน GPU, float32 บน CPU)
+    compute_dtype = tf.keras.mixed_precision.global_policy().compute_dtype
+
+    inp = tf.keras.Input(shape=(lookback, n_features), name="input_seq",
+                         dtype="float32")   # input เสมอ float32
 
     # ── BiLSTM layer 1 ────────────────────────────────────────────────────────
     x = layers.Bidirectional(
@@ -220,7 +227,8 @@ def build_model(
     x = layers.Dense(DENSE_UNITS[1], activation="gelu", name="dense_2")(x)
 
     # ── Output: 24 hourly predictions ─────────────────────────────────────────
-    out = layers.Dense(n_output, name="output")(x)
+    # cast กลับเป็น float32 เสมอ (สำคัญสำหรับ mixed precision)
+    out = layers.Dense(n_output, name="output", dtype="float32")(x)
 
     model = Model(inputs=inp, outputs=out)
     return model
@@ -447,12 +455,37 @@ def train_lstm_target(
     log.info("  🧠  Training LSTM — target: %s", target.upper())
     log.info("━" * 62)
 
-    # ── ตรวจ GPU ──────────────────────────────────────────────────────────────
+    # ── GPU Setup ─────────────────────────────────────────────────────────────
     gpus = tf.config.list_physical_devices("GPU")
-    log.info("    GPU: %s", gpus if gpus else "None (CPU training)")
     if gpus:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
+        log.info("    GPU: %d device(s) — %s",
+                 len(gpus), [g.name for g in gpus])
+
+        # Mixed Precision: float16 computation, float32 weights
+        # → ~2x speedup, ใช้ VRAM ครึ่งหนึ่ง
+        tf.keras.mixed_precision.set_global_policy("mixed_float16")
+        log.info("    Mixed precision : mixed_float16 ✅")
+
+        # XLA JIT compilation — fuse ops ให้ GPU ทำงานต่อเนื่องไม่สะดุด
+        tf.config.optimizer.set_jit(True)
+        log.info("    XLA JIT         : enabled ✅")
+
+        # Multi-GPU: ถ้ามีมากกว่า 1 GPU ใช้ MirroredStrategy อัตโนมัติ
+        strategy = (tf.distribute.MirroredStrategy()
+                    if len(gpus) > 1
+                    else tf.distribute.get_strategy())
+        log.info("    Strategy        : %s", strategy.__class__.__name__)
+    else:
+        log.info("    GPU: None — CPU training")
+        tf.keras.mixed_precision.set_global_policy("float32")
+        strategy = tf.distribute.get_strategy()
+
+    # batch ใหญ่ขึ้นตามจำนวน GPU
+    effective_batch = BATCH_SIZE * max(1, len(gpus))
+    log.info("    Effective batch : %d  (%d × %d GPUs)",
+             effective_batch, BATCH_SIZE, max(1, len(gpus)))
 
     # ── Feature matrix ────────────────────────────────────────────────────────
     target_col_idx = FEATURE_NAMES.index(target)   # 0=temp, 1=hum
@@ -494,15 +527,39 @@ def train_lstm_target(
     log.info("    Sequences — train: %d  val: %d  test: %d",
              len(X_train_seq), len(X_val_seq), len(X_test_seq))
 
-    # ── Build model ───────────────────────────────────────────────────────────
-    model = build_model(lookback=lookback, n_features=N_FEATURES, n_output=N_HOURS_AHEAD)
-    model.summary(print_fn=lambda s: log.info("    %s", s))
+    # ── tf.data Pipeline ──────────────────────────────────────────────────────
+    # ใช้ tf.data แทน numpy arrays โดยตรง เพื่อ:
+    #   - prefetch: GPU ไม่ต้องรอ CPU load batch
+    #   - cache: เก็บ data ใน RAM ไม่ต้องอ่านซ้ำทุก epoch
+    #   - shuffle: สุ่ม batch ทุก epoch ป้องกัน overfitting
+    def make_dataset(X, y, shuffle=False):
+        ds = tf.data.Dataset.from_tensor_slices(
+            (X.astype("float32"), y.astype("float32"))
+        )
+        if shuffle:
+            ds = ds.shuffle(buffer_size=len(X), reshuffle_each_iteration=True)
+        ds = (ds
+              .batch(effective_batch, drop_remainder=True if gpus else False)
+              .cache()
+              .prefetch(tf.data.AUTOTUNE))
+        return ds
 
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=LR_INIT),
-        loss="huber",          # Huber loss: robust กับ outlier sensor
-        metrics=["mae"],
-    )
+    train_ds = make_dataset(X_train_seq, y_train_seq, shuffle=True)
+    val_ds   = make_dataset(X_val_seq,   y_val_seq,   shuffle=False)
+    test_ds  = make_dataset(X_test_seq,  y_test_seq,  shuffle=False)
+    log.info("    tf.data pipeline : cache + prefetch(AUTOTUNE) ✅")
+
+    # ── Build model (ภายใน strategy scope สำหรับ multi-GPU) ──────────────────
+    with strategy.scope():
+        model = build_model(lookback=lookback, n_features=N_FEATURES, n_output=N_HOURS_AHEAD)
+        model.summary(print_fn=lambda s: log.info("    %s", s))
+
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_INIT),
+            loss="huber",          # Huber loss: robust กับ outlier sensor
+            metrics=["mae"],
+            jit_compile=bool(gpus),  # XLA per-model (เปิดเฉพาะ GPU)
+        )
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
     ckpt_path = str(model_dir / f"lstm_{target}_best.keras")
@@ -530,12 +587,11 @@ def train_lstm_target(
 
     # ── Train ─────────────────────────────────────────────────────────────────
     log.info("    🚀 Start training  (epochs=%d  batch=%d  patience=%d)",
-             epochs, BATCH_SIZE, PATIENCE_STOP)
+             epochs, effective_batch, PATIENCE_STOP)
     history = model.fit(
-        X_train_seq, y_train_seq,
-        validation_data=(X_val_seq, y_val_seq),
+        train_ds,
+        validation_data=val_ds,
         epochs=epochs,
-        batch_size=BATCH_SIZE,
         callbacks=callbacks,
         verbose=2,
     )
@@ -545,7 +601,7 @@ def train_lstm_target(
     log.info("    ✅ Best epoch: %d   val_loss(Huber): %.6f", best_epoch, best_val)
 
     # ── Evaluate on Test ──────────────────────────────────────────────────────
-    y_pred_scaled = model.predict(X_test_seq, verbose=0)   # (N, 24) — scaled
+    y_pred_scaled = model.predict(test_ds, verbose=0)   # (N, 24) — scaled
 
     # inverse transform y
     y_test_real = scaler_y.inverse_transform(y_test_seq.reshape(-1, 1)).reshape(y_test_seq.shape)
