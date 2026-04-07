@@ -1,5 +1,22 @@
-influxdb-client
-python-dotenv
-pandas
-matplotlib
-seaborn
+# ── Core data ─────────────────────────────────────────────────────────────
+numpy==1.26.4
+pandas==2.2.3
+
+# ── InfluxDB client ────────────────────────────────────────────────────────
+influxdb-client==1.44.0
+reactivex==4.1.0
+
+# ── MQTT 
+paho-mqtt==1.6.1
+
+# ── Plotting 
+matplotlib==3.9.2
+seaborn==0.13.2
+
+# ── Deep Learning ─────────────────────────────────────────────────────────────
+tensorflow>=2.15.0
+
+# ── Utils ──────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1
+certifi>=2024.0.0
+urllib3>=1.26.0,<3.0.0

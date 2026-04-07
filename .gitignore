@@ -17,17 +17,17 @@ secrets.json
 configs/credentials.yaml
 
 # --- Data ---
-data/raw/*
-data/processed/*
-!data/raw/.gitkeep
-!data/processed/.gitkeep
+# data/raw/*
+# data/processed/*
+# !data/raw/.gitkeep
+# !data/processed/.gitkeep
 
-# --- Machine Learning Models ---
-models/*.pkl
-models/*.joblib
-models/*.onnx
-models/*.json
-models/*.h5
+# # --- Machine Learning Models ---
+# models/*.pkl
+# models/*.joblib
+# models/*.onnx
+# models/*.json
+# models/*.h5
 
 # # --- Notebooks ---
 # .ipynb_checkpoints/
