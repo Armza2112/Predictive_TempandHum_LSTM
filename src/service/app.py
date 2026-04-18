@@ -23,7 +23,7 @@ from src.processing.data_cleaning import (
     handle_outliers,
 )
 # LSTM inference helper
-from src.trainnig.lstm_trainer import predict_lstm
+from src.trainnig.lstm_trainer import predict_lstm, NumpyScaler  # noqa: F401 — จำเป็นสำหรับ pickle
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Config
@@ -33,7 +33,7 @@ TB_PORT      = int(os.getenv("TB_MQTT_PORT", "1889"))
 TB_USERNAME  = os.getenv("TB_MQTT_USERNAME", "z0cidvhmfrv6qm43h3h4")
 TB_TOPIC     = os.getenv("TB_MQTT_TOPIC",    "v1/devices/me/telemetry")
 
-MODEL_DIR    = Path("model")
+MODEL_DIR    = Path("models")
 FETCH_HOURS  = 36      # ดึงย้อนหลัง 36h (lag_144 ต้องการ 24h + buffer สำหรับ rolling)
 INTERVAL_MIN = 10      # รอบการส่งข้อมูล (นาที) เมื่อใช้ --loop
 TIMEOUT_SEC  = 10      # MQTT connect timeout (วินาที)

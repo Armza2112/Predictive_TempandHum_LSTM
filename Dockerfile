@@ -31,7 +31,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # ── Application source ───────────────────────────────────────────────────
 COPY src/     src/
-COPY model/   model/
+COPY models/  models/
 COPY config/  config/
 
 # ── Healthcheck ──────────────────────────────────────────────────────────

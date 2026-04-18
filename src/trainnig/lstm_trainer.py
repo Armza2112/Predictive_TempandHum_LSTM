@@ -66,7 +66,7 @@ TRAIN_PATH     = Path("data/processed/train.csv")
 VAL_PATH       = Path("data/processed/val.csv")
 TEST_PATH      = Path("data/processed/test.csv")
 CLEAN_PATH     = Path("data/processed/sensor_data_clean.csv")
-MODEL_DIR      = Path("model")
+MODEL_DIR      = Path("models")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

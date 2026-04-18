@@ -1,0 +1,39 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  requirements-raspi.txt  —  Raspberry Pi 4 (arm64) Inference Only
+#  วิธีติดตั้ง:
+#      pip install -r requirements-raspi.txt
+#
+#  ⚠️  ไม่รวม tensorflow (500MB+) — ใช้ tflite-runtime แทนสำหรับ inference
+#  ✅  ใช้สำหรับ app.py --once / --loop / --schedule บน RPi เท่านั้น
+#  📌  Training ทำบน PC แล้ว copy models/tflite/ ไปไว้บน RPi
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Core data handling ────────────────────────────────────────────────────────
+numpy==1.26.4
+pandas==2.2.3
+
+# ── InfluxDB connector ────────────────────────────────────────────────────────
+influxdb-client==1.44.0
+reactivex==4.1.0
+
+# ── MQTT (ThingsBoard) ────────────────────────────────────────────────────────
+paho-mqtt==1.6.1
+
+# ── Environment config ────────────────────────────────────────────────────────
+python-dotenv==1.0.1
+
+# ── TFLite runtime (lightweight inference engine ~20MB vs tensorflow ~500MB) ──
+# RPi 4 arm64 / armv7 ใช้ตัวนี้แทน tensorflow เต็ม
+# ดู wheel ที่ถูก architecture ได้ที่:
+#   https://github.com/google-coral/pycoral/releases (tflite-runtime wheels)
+#
+# ติดตั้ง:
+#   pip install tflite-runtime
+#   หรือถ้า arm64:
+#   pip install tflite-runtime --index-url https://google-coral.github.io/py-pkgs-coral/
+
+tflite-runtime>=2.14.0
+
+# ── SSL / HTTP ────────────────────────────────────────────────────────────────
+certifi>=2024.0.0
+urllib3>=1.26.0,<3.0.0

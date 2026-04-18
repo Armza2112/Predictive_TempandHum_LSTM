@@ -1,0 +1,63 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  Dockerfile.raspi  —  Raspberry Pi 4 (arm64 / armv7)
+#  Inference-only service  |  tflite-runtime แทน tensorflow (~500MB → ~80MB)
+#
+#  Build บน PC (cross-compile):
+#      docker buildx build --platform linux/arm64 \
+#          -f Dockerfile.raspi -t predict-raspi:latest --load .
+#
+#  Push to registry แล้วดึงบน RPi:
+#      docker buildx build --platform linux/arm64 \
+#          -f Dockerfile.raspi -t youruser/predict-raspi:latest --push .
+#      # บน RPi:
+#      docker pull youruser/predict-raspi:latest
+#      docker run --env-file .env youruser/predict-raspi:latest
+#
+#  Build บน RPi โดยตรง (ง่ายกว่า):
+#      docker build -f Dockerfile.raspi -t predict-raspi:latest .
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Base image: รองรับ arm64 / amd64 ใน tag เดียวกัน ────────────────────────
+FROM python:3.11-slim-bookworm
+
+LABEL maintainer="arm"
+LABEL description="Predict temp & hum — RPi inference service (tflite-runtime)"
+LABEL arch="linux/arm64"
+
+ENV TZ=Asia/Bangkok
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+# ── System packages (เฉพาะที่ tflite-runtime / numpy ต้องการ) ──────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libopenblas-dev \
+        libatomic1 \
+        tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Working directory ────────────────────────────────────────────────────────
+WORKDIR /app
+
+# ── Python dependencies (lightweight, ไม่มี tensorflow) ─────────────────────
+COPY requirements-raspi.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --timeout=300 -r requirements-raspi.txt
+
+# ── Application source ───────────────────────────────────────────────────────
+COPY src/     src/
+COPY config/  config/
+
+# ── TFLite models (เบากว่า .keras ประมาณ 4x หลัง quantization) ─────────────
+# ถ้ามี models/tflite/ ให้ copy เข้าไปด้วย (export ด้วย --export-tflite ก่อน)
+COPY models/  models/
+
+# ── Healthcheck ──────────────────────────────────────────────────────────────
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
+    CMD python -c "import tflite_runtime.interpreter; print('ok')" || exit 1
+
+# ── Default: รัน service ทุกเที่ยงคืน ────────────────────────────────────────
+CMD ["python", "-m", "src.service.app", "--at", "00:00"]
